@@ -4,7 +4,9 @@ import com.finguard.transactionapi.transaction.domain.Transaction;
 
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.stereotype.Repository;
 
+@Repository
 public class InMemoryTransactionRepository implements TransactionRepository{
     
 
