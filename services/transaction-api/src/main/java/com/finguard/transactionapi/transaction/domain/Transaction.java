@@ -23,5 +23,20 @@ public class Transaction{
         return id;
     }
     
+    public BigDecimal getAmount(){
+        return amount;
+    }
+
+    public String getCurrency(){
+        return currency;
+    }
+
+    public TransactionStatus getStatus(){
+        return status;
+    }
+
+    public Instant getCreatedAt(){
+        return createdAt;
+    }
 
 }

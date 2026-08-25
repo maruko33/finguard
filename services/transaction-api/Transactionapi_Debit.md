@@ -11,3 +11,6 @@ CreateTransactionRequest.java
 - Add Bean Validation annotations
 - Could convert currency to enum / Currency type
 - Could validate monetary precision
+
+TransactionService.java
+- findIdBy(): could throw exception when there is empty return here
