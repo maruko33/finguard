@@ -19,17 +19,22 @@ public class TransactionService{
 
     public TransactionResponse createTransaction(CreateTransactionRequest request){
             Transaction createdTransaction = repository.save(new Transaction(request.amount(), request.currency()));
-            return new TransactionResponse(
-                createdTransaction.getId(),
-                createdTransaction.getAmount(),
-                createdTransaction.getCurrency(),
-                createdTransaction.getStatus(),
-                createdTransaction.getCreatedAt()
-            );
+            return toResponse(createdTransaction);
         }
 
     //Debit: could throw exception when there is empty return here
-    public Optional<Transaction> findById(UUID id){
-        return repository.findById(id);
+    public Optional<TransactionResponse> findById(UUID id){
+        return repository.findById(id).map(transaction -> toResponse(transaction)
+        );
+    }
+
+    private TransactionResponse toResponse(Transaction transaction){
+        return new TransactionResponse(
+            transaction.getId(),
+            transaction.getAmount(),
+            transaction.getCurrency(),
+            transaction.getStatus(),
+            transaction.getCreatedAt()
+        );        
     }
 }

@@ -10,7 +10,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.http.ResponseEntity;
+import java.util.UUID;
 
 
 @RestController
@@ -28,5 +31,16 @@ public class TransactionController{
     public TransactionResponse CreateTransaction(
         @Valid @RequestBody CreateTransactionRequest request){
         return service.createTransaction(request);
+    }
+
+    @GetMapping("/{id}")
+    
+    public ResponseEntity<TransactionResponse> FindTransactionId(
+        @PathVariable
+        UUID id
+    ){
+        return service.findById(id)
+        .map(response -> ResponseEntity.ok(response))
+        .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }
