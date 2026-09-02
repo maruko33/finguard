@@ -35,12 +35,10 @@ public class TransactionController{
 
     @GetMapping("/{id}")
     
-    public ResponseEntity<TransactionResponse> FindTransactionId(
+    public TransactionResponse FindTransactionId(
         @PathVariable
         UUID id
     ){
-        return service.findById(id)
-        .map(response -> ResponseEntity.ok(response))
-        .orElseGet(() -> ResponseEntity.notFound().build());
+        return service.findById(id);
     }
 }

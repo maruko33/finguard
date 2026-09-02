@@ -3,6 +3,7 @@ package com.finguard.transactionapi.transaction.service;
 import com.finguard.transactionapi.transaction.repository.TransactionRepository;
 import com.finguard.transactionapi.transaction.domain.Transaction;
 import com.finguard.transactionapi.transaction.dto.CreateTransactionRequest;
+import com.finguard.transactionapi.transaction.exception.TransactionNotFoundException;
 import org.springframework.stereotype.Service;
 import com.finguard.transactionapi.transaction.dto.TransactionResponse;
 import java.util.Optional;
@@ -23,9 +24,14 @@ public class TransactionService{
         }
 
     //Debit: could throw exception when there is empty return here
-    public Optional<TransactionResponse> findById(UUID id){
-        return repository.findById(id).map(transaction -> toResponse(transaction)
-        );
+    public TransactionResponse findById(UUID id) {
+        return repository.findById(id)
+                .map(transaction -> toResponse(transaction))
+                .orElseThrow(() ->
+                        new TransactionNotFoundException(
+                                "Transaction with id " + id + " was not found"
+                        )
+                );
     }
 
     private TransactionResponse toResponse(Transaction transaction){
