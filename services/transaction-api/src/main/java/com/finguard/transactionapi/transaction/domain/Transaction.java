@@ -19,6 +19,13 @@ public class Transaction{
         this.createdAt = Instant.now();
     }
 
+    public Transaction(UUID id, BigDecimal amount, String currency, TransactionStatus status, Instant createAt){
+        this.id = id;
+        this.amount = amount;
+        this.currency = currency;
+        this.status = status;
+        this.createdAt = createAt;
+    }
     public UUID getId() {
         return id;
     }

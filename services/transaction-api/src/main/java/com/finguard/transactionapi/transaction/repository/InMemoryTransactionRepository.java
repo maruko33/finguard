@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-@Repository
+
 public class InMemoryTransactionRepository
         implements TransactionRepository {
 
