@@ -14,3 +14,6 @@ CreateTransactionRequest.java
 
 TransactionService.java
 - findIdBy(): could throw exception when there is empty return here
+
+Docker will respond for Maven build
+- Use multi-stage build
