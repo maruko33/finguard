@@ -6,20 +6,28 @@ import com.finguard.transactionapi.transaction.dto.CreateTransactionRequest;
 import com.finguard.transactionapi.transaction.exception.TransactionNotFoundException;
 import org.springframework.stereotype.Service;
 import com.finguard.transactionapi.transaction.dto.TransactionResponse;
-import java.util.Optional;
+import com.finguard.transactionapi.transaction.messaging.TransactionCreatedEvent;
+import com.finguard.transactionapi.transaction.messaging.TransactionEventPublisher;
 import java.util.UUID;
 
 @Service
 public class TransactionService{
     private final TransactionRepository repository;
+    private final TransactionEventPublisher eventPublisher;
 
     // Constructor Injection
-    public TransactionService(TransactionRepository repository){
+    public TransactionService(TransactionRepository repository, TransactionEventPublisher eventPublisher){
         this.repository = repository;
+        this.eventPublisher = eventPublisher;
     }
 
     public TransactionResponse createTransaction(CreateTransactionRequest request){
             Transaction createdTransaction = repository.save(new Transaction(request.amount(), request.currency()));
+            eventPublisher.publish(new TransactionCreatedEvent(
+                    createdTransaction.getId(),
+                    createdTransaction.getAmount(),
+                    createdTransaction.getCurrency()
+            ));
             return toResponse(createdTransaction);
         }
 

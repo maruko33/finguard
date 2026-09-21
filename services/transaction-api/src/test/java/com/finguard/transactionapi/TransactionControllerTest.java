@@ -22,7 +22,8 @@ class TransactionControllerTest {
 
         TransactionService service =
                 new TransactionService(
-                        new InMemoryTransactionRepository()
+                        new InMemoryTransactionRepository(),
+                        event -> {}
                 );
 
         controller =

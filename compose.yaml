@@ -7,9 +7,24 @@ services:
       - "8080:8080"
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/finguard
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL}
+      AWS_PROFILE: finguard-dev
+      AWS_DEFAULT_REGION: ca-central-1
+    volumes:
+      - ${HOME}/.aws:/root/.aws:ro
     depends_on:
       postgres:
         condition: service_healthy
+
+  risk-worker:
+    build:
+      context: ./services/risk-worker
+    environment:
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL}
+      AWS_PROFILE: finguard-dev
+      AWS_DEFAULT_REGION: ca-central-1
+    volumes:
+      - ${HOME}/.aws:/root/.aws:ro
 
   postgres:
     image: postgres:17

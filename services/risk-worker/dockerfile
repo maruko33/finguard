@@ -10,4 +10,5 @@ COPY src ./src
 
 ENV PYTHONPATH=/app/src
 
-ENTRYPOINT ["python", "-m", "risk_worker.main"]
+ENTRYPOINT ["python", "-m"]
+CMD ["risk_worker.sqs_consumer"]
