@@ -29,9 +29,11 @@ output "transaction_api_ecr_url" {
   value       = aws_ecr_repository.transaction_api.repository_url
 }
 
-output "risk_worker_ecr_url" {
-  description = "ECR repository URL for the Risk Worker"
-  value       = aws_ecr_repository.risk_worker.repository_url
+#----------------Risk worker IAM role ARN---------------------- 
+
+output "risk_worker_iam_role_arn" {
+  description = "Risk worker IAM role ARN"
+  value       = aws_iam_role.risk_worker_lambda.arn
 }
 
 #--------------------ALB address--------------------------------

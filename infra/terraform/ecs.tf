@@ -13,10 +13,6 @@ resource "aws_cloudwatch_log_group" "transaction_api" {
   retention_in_days = 7
 }
 
-resource "aws_cloudwatch_log_group" "risk_worker" {
-  name              = "/ecs/finguard-risk-worker"
-  retention_in_days = 7
-}
 
 
 #-------------Transaction API Task Definition------------
@@ -90,52 +86,7 @@ resource "aws_ecs_task_definition" "transaction_api" {
   ])
 }
 
-#-----------------Risk Worker Task Definition------------------------
-resource "aws_ecs_task_definition" "risk_worker" {
-  family                   = "finguard-risk-worker"
-  requires_compatibilities = ["FARGATE"]
-  network_mode             = "awsvpc"
 
-  cpu    = "256"
-  memory = "512"
-
-  execution_role_arn = aws_iam_role.ecs_execution.arn
-  task_role_arn      = aws_iam_role.risk_worker_task.arn
-
-  runtime_platform {
-    operating_system_family = "LINUX"
-    cpu_architecture        = "X86_64"
-  }
-
-  container_definitions = jsonencode([
-    {
-      name      = "risk-worker"
-      image     = "${aws_ecr_repository.risk_worker.repository_url}:${var.image_tag}"
-      essential = true
-
-      environment = [
-        {
-          name  = "SQS_QUEUE_URL"
-          value = aws_sqs_queue.transactions.url
-        },
-        {
-          name  = "AWS_DEFAULT_REGION"
-          value = var.aws_region
-        }
-      ]
-
-      logConfiguration = {
-        logDriver = "awslogs"
-
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.risk_worker.name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "ecs"
-        }
-      }
-    }
-  ])
-}
 
 #----------------------Transaction_api ECS service--------------------------
 resource "aws_ecs_service" "transaction_api" {
@@ -147,13 +98,13 @@ resource "aws_ecs_service" "transaction_api" {
   desired_count = 1
 
   network_configuration {
-    subnets = aws_subnet.app_private[*].id
+    subnets = aws_subnet.public[*].id
 
     security_groups = [
       aws_security_group.ecs_api.id
     ]
 
-    assign_public_ip = false
+    assign_public_ip = true
   }
 
   load_balancer {
@@ -167,22 +118,3 @@ resource "aws_ecs_service" "transaction_api" {
   ]
 }
 
-#----------------------Risk worker ECS service--------------------------
-resource "aws_ecs_service" "risk_worker" {
-  name            = "finguard-risk-worker"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.risk_worker.arn
-
-  launch_type   = "FARGATE"
-  desired_count = 1
-
-  network_configuration {
-    subnets = aws_subnet.app_private[*].id
-
-    security_groups = [
-      aws_security_group.ecs_worker.id
-    ]
-
-    assign_public_ip = false
-  }
-}

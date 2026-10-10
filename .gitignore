@@ -3,3 +3,9 @@
 .terraform/
 *.tfstate
 *.tfstate.*
+# Local environment variants and Terraform secret-bearing inputs/artifacts
+.env.*
+!.env.example
+*.tfvars
+*.tfvars.json
+*.tfplan

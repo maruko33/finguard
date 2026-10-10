@@ -7,6 +7,8 @@ services:
       - "8080:8080"
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/finguard
+      DB_USERNAME: finguard
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the local .env}
       SQS_QUEUE_URL: ${SQS_QUEUE_URL}
       AWS_PROFILE: finguard-dev
       AWS_DEFAULT_REGION: ca-central-1
@@ -33,7 +35,7 @@ services:
     environment:
       POSTGRES_DB: finguard
       POSTGRES_USER: finguard
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the local .env}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:

@@ -19,7 +19,7 @@ variable "transactions_dlq_name" {
 variable "visibility_timeout_seconds" {
   description = "How long an SQS message stays invisible after being received"
   type        = number
-  default     = 30
+  default     = 60
 }
 
 variable "receive_wait_time_seconds" {
