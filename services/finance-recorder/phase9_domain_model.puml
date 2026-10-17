@@ -1,0 +1,94 @@
+@startuml
+' Phase 9 — Proposed Domain Model (not an exact copy of the original PDF)
+' Edit and review with product owner before implementation.
+hide circle
+skinparam classAttributeIconSize 0
+left to right direction
+
+enum EntryType {
+  INCOME
+  EXPENSE
+}
+
+enum ImportStatus {
+  DRAFT
+  REVIEWING
+  CONFIRMED
+  CANCELLED
+  FAILED
+}
+
+class User <<Entity>> {
+  +id: UUID
+  +displayName: String
+  +preferredCurrency: CurrencyCode
+}
+class FinancialAccount <<Entity>> {
+  +id: UUID
+  +name: String
+  +type: AccountType
+}
+class Category <<Entity>> {
+  +id: UUID
+  +name: String
+  +type: EntryType
+}
+class LedgerEntry <<Entity>> {
+  +id: UUID
+  +type: EntryType
+  +amount: Money
+  +entryDate: LocalDate
+  +description: String
+  +source: EntrySource
+}
+class Money <<Value Object>> {
+  +amount: BigDecimal
+  +currency: CurrencyCode
+}
+class ImportBatch <<Entity>> {
+  +id: UUID
+  +status: ImportStatus
+  +createdAt: Instant
+  +confirmedAt: Instant?
+}
+class ImportCandidate <<Entity>> {
+  +id: UUID
+  +rowNumber: int
+  +type: EntryType
+  +amount: Money
+  +entryDate: LocalDate
+  +normalizedDescription: String
+  +proposedCategoryId: UUID?
+  +duplicateWarning: boolean
+  +selectedForImport: boolean
+}
+class Budget <<Entity; later increment>> {
+  +id: UUID
+  +period: YearMonth
+  +target: Money
+}
+
+User "1" -- "0..*" FinancialAccount : owns
+User "1" -- "0..*" Category : owns or can select defaults
+User "1" -- "0..*" LedgerEntry : owns
+User "1" -- "0..*" ImportBatch : starts
+User "1" -- "0..*" Budget : defines
+FinancialAccount "1" -- "0..*" LedgerEntry : entries
+Category "0..1" <-- "0..*" LedgerEntry : categorized as
+LedgerEntry *-- "1" Money : amount
+ImportBatch *-- "1..*" ImportCandidate : staging rows
+ImportBatch "0..*" --> "1" FinancialAccount : target account
+Budget "0..*" --> "0..1" Category : optional category
+LedgerEntry ..> EntryType
+ImportBatch ..> ImportStatus
+
+note bottom of LedgerEntry
+This is a finance LedgerEntry.
+Do not reuse the Phase 8 risk Transaction model.
+Amount must be positive, no floating point money.
+end note
+note bottom of ImportBatch
+Preview is not committed ledger data.
+Confirmation must be idempotent.
+end note
+@enduml

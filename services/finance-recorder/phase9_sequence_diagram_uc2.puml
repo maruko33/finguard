@@ -1,0 +1,198 @@
+
+@startuml
+!pragma teoz true
+title FinGuard Phase 9 - UC2: CSV Import, Review, Restore, Confirm
+hide footbox
+autonumber
+
+actor User as U
+boundary "Angular Import Page" as UI
+control "ImportController" as C
+control "ImportService" as S
+participant "CsvParser" as P
+participant "EntryValidator" as V
+participant "RuleBasedClassifier" as CL
+participant "DuplicateDetector" as DD
+participant "ImportBatchRepository" as BR
+participant "FinancialAccountRepository" as AR
+participant "LedgerEntryRepository" as LR
+database "PostgreSQL" as DB
+
+note over U,DB
+  Preconditions: user is authenticated.
+  Target FinancialAccount belongs to user.
+  Preview is persisted, but not committed as ledger entries.
+end note
+
+group A. Upload CSV and create persistent preview
+  U -> UI: Select account and upload CSV
+  UI -> C: POST /api/v1/import-batches
+  note right of C
+    CSV file, accountId,
+    Idempotency-Key
+  end note
+  C -> S: prepareImport(userId, accountId, file, uploadKey)
+
+  S -> BR: findByUserAndUploadKey(userId, uploadKey)
+  BR -> DB: SELECT import_batch
+  DB --> BR: Existing batch or none
+  BR --> S: Result
+
+  alt Same key and same file
+    S --> C: Existing Preview
+    C --> UI: HTTP 200
+  else Same key but different file
+    S --> C: Idempotency conflict
+    C --> UI: HTTP 409
+  else New upload
+    S -> P: parse(file)
+    P --> S: ParseResult
+
+    alt Fatal CSV parsing error
+      S --> C: Validation errors
+      C --> UI: HTTP 422
+    else File is parseable
+      S -> V: validate(parsedRows)
+      V --> S: RowValidationResult
+
+      S -> CL: suggestCategories(validRows)
+      CL --> S: SuggestedCategories
+
+      S -> DD: findPotentialMatches(rows, accountId, 15min)
+
+      DD -> LR: findNearbyLedgerEntries(...)
+      LR -> DB: Indexed SELECT
+      DB --> LR: Potential ledger matches
+      LR --> DD: Matches
+
+      DD -> BR: findOtherActivePreviewMatches(...)
+      BR -> DB: SELECT reviewing candidates
+      DB --> BR: Matching candidates and batch IDs
+      BR --> DD: Matches
+
+      DD --> S: DuplicateWarnings
+
+      S -> BR: saveBatchAndCandidates(REVIEWING)
+      BR -> DB: INSERT import_batch
+      BR -> DB: INSERT import_candidate
+      DB --> BR: batchId and candidateIds
+      BR --> S: Saved preview
+
+      S --> C: PreviewResult
+      C --> UI: HTTP 201
+    end
+  end
+
+  UI --> U: Display preview and warnings
+end
+
+opt B. User returns to unfinished import
+  U -> UI: Open Imports page
+  UI -> C: GET /api/v1/import-batches?status=REVIEWING
+  C -> S: getActivePreviews(userId)
+  S -> BR: findReviewingBatches(userId)
+  BR -> DB: SELECT batches and candidates
+  DB --> BR: Saved preview
+  BR --> S: Reviewable batches
+  S --> C: Preview summaries
+  C --> UI: HTTP 200
+  UI --> U: Resume or Discard
+end
+
+opt C. User edits review
+  U -> UI: Edit category / exclude / acknowledge warning
+  UI -> C: PATCH /api/v1/import-batches/{id}/review
+  C -> S: updateReview(userId, batchId, decisions)
+
+  S -> V: validate(changedRows)
+  V --> S: ValidationResult
+
+  S -> BR: saveReviewChanges(...)
+  BR -> DB: UPDATE import_candidate and review decisions
+  DB --> BR: Saved
+  BR --> S: Updated preview
+  S --> C: Updated preview
+  C --> UI: HTTP 200
+end
+
+group D. Confirm import - One database transaction
+  U -> UI: Confirm selected entries
+  UI -> C: POST /api/v1/import-batches/{id}/confirm
+  C -> S: confirm(userId, batchId)
+
+  note over S,DB #FFF2CC
+    @Transactional
+    All inserts and the batch status update
+    commit or rollback together.
+  end note
+
+  S -> BR: findByIdForUpdate(batchId, userId)
+  BR -> DB: SELECT ... FOR UPDATE
+  DB --> BR: Locked ImportBatch
+  BR --> S: Batch and status
+
+  alt Already CONFIRMED
+    S --> C: Previous confirmation result
+    C --> UI: HTTP 200, no new inserts
+  else Not REVIEWING
+    S --> C: Invalid batch status
+    C --> UI: HTTP 409
+  else REVIEWING
+    S -> AR: lockAccountForImport(accountId)
+    AR -> DB: SELECT financial_account FOR UPDATE
+    DB --> AR: Account lock
+    AR --> S: Lock acquired
+
+    S -> V: validateSelectedCandidates(...)
+    V --> S: ValidationResult
+
+    S -> DD: recheckAgainstCommittedLedger(...)
+    DD -> LR: findNearbyLedgerEntries(...)
+    LR -> DB: Indexed set-based SELECT
+    DB --> LR: Current matches
+    LR --> DD: Matches
+    DD --> S: Strong duplicates and new warnings
+
+    alt Strong duplicate or unacknowledged new warning
+      S --> C: ConflictResult
+      C --> UI: HTTP 409, re-review required
+      UI --> U: Review changed matches
+    else Safe or weak warnings acknowledged
+      S -> LR: bulkInsertSelected(batchId, candidates)
+      LR -> DB: INSERT ledger_entry rows
+
+      note right of DB
+        UNIQUE(source_candidate_id)
+        UNIQUE(account_id, bank_txn_id)
+        when bank_txn_id is present
+      end note
+
+      alt Database uniqueness conflict
+        DB --> LR: Constraint violation
+        LR --> S: Exception, rollback
+        S --> C: Conflict
+        C --> UI: HTTP 409
+      else Insert successful
+        DB --> LR: Inserted entries
+        LR --> S: Created count
+
+        S -> BR: markConfirmedAndStoreResult(...)
+        BR -> DB: UPDATE import_batch
+        DB --> BR: Updated
+        BR --> S: Saved result
+
+        S --> C: ConfirmationResult
+        C --> UI: HTTP 200
+        UI --> U: Confirmation page
+      end
+    end
+  end
+end
+
+note over DD,DB
+  Weak duplicate warning:
+  Same account + type + currency + amount
+  within 15 minutes.
+  Never auto-delete a legitimate repeated purchase.
+end note
+@enduml

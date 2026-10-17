@@ -1,0 +1,108 @@
+@startuml
+' FinGuard Phase 9 — Finance database ERD (proposed, matches phase9_finance_schema.sql)
+left to right direction
+hide circle
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+
+entity "app_user" as U {
+  * id: UUID <<PK>>
+  --
+  * auth_subject: VARCHAR(255) <<unique>>
+  * display_name: VARCHAR(120)
+  * preferred_currency_code: CHAR(3)
+}
+entity "financial_account" as A {
+  * id: UUID <<PK>>
+  --
+  * user_id: UUID <<FK>>
+  * name: VARCHAR(120)
+  * account_type: VARCHAR(30)
+  * currency_code: CHAR(3)
+  * active: BOOLEAN
+}
+entity "category" as C {
+  * id: UUID <<PK>>
+  --
+  * user_id: UUID <<FK>>
+  * name: VARCHAR(100)
+  * entry_type: VARCHAR(10)
+  * active: BOOLEAN
+}
+entity "import_batch" as B {
+  * id: UUID <<PK>>
+  --
+  * user_id: UUID <<FK>>
+  * account_id: UUID <<FK>>
+  * upload_key: UUID <<unique with user>>
+  * file_sha256: CHAR(64)
+  * status: VARCHAR(15)
+  * version: BIGINT
+  * confirmed_count: INTEGER
+    confirmed_at: TIMESTAMPTZ <<nullable>>
+    closed_at: TIMESTAMPTZ <<nullable>>
+}
+entity "import_candidate" as I {
+  * id: UUID <<PK>>
+  --
+  * batch_id: UUID <<FK>>
+  * user_id: UUID <<FK via batch>>
+  * row_number: INTEGER <<unique with batch>>
+    entry_type: VARCHAR(10) <<nullable>>
+    amount: NUMERIC(19,2) <<nullable>>
+    currency_code: CHAR(3) <<nullable>>
+    transaction_date: DATE <<nullable>>
+    occurred_at: TIMESTAMPTZ <<nullable>>
+    category_id: UUID <<FK, nullable>>
+  * validation_errors: JSONB
+  * selected_for_import: BOOLEAN
+  * duplicate_warning: BOOLEAN
+  * duplicate_acknowledged: BOOLEAN
+    duplicate_match_signature: CHAR(64)
+}
+entity "ledger_entry" as L {
+  * id: UUID <<PK>>
+  --
+  * user_id: UUID <<FK>>
+  * account_id: UUID <<FK>>
+    source_batch_id: UUID <<FK, nullable>>
+    source_row_number: INTEGER <<nullable>>
+    client_request_key: UUID <<nullable>>
+  * entry_type: VARCHAR(10)
+  * amount: NUMERIC(19,2)
+  * currency_code: CHAR(3)
+  * transaction_date: DATE
+    occurred_at: TIMESTAMPTZ <<nullable>>
+    category_id: UUID <<FK, nullable>>
+    bank_transaction_id: VARCHAR(255)
+    deleted_at: TIMESTAMPTZ <<nullable>>
+}
+
+U ||--o{ A : owns
+U ||--o{ C : owns
+U ||--o{ B : uploads
+U ||--o{ L : owns
+A ||--o{ B : target
+A ||--o{ L : holds
+B ||--o{ I : stages
+B |o--o{ L : source of
+C |o--o{ I : proposes
+C |o--o{ L : classifies
+
+note bottom of B
+  UNIQUE(user_id, upload_key)
+  Lock on confirm: SELECT FOR UPDATE
+  Keep batch after candidate cleanup
+end note
+note bottom of I
+  UNIQUE(batch_id, row_number)
+  Invalid rows allowed as UNSELECTED
+  Warnings are not automatic deletion
+end note
+note bottom of L
+  UNIQUE(source_batch_id, source_row_number)
+  Trusted bank ID unique within account
+  All reports exclude deleted_at rows
+end note
+@enduml
