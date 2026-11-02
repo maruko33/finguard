@@ -1,5 +1,93 @@
 # Phase 9.6.1 — RBC CSV parsing, normalization and validation
 
+> Historical scope: the results below describe the parsing/row-outcome slice at that time. Persisted preview, review decisions and atomic confirmation have since been implemented in the working tree; see the [Import closeout verification](import_acceptance_closeout.md) for current executed evidence. Earlier counts are not the final regression total.
+
+## Historical follow-up: complete per-row preview outcomes — 2026-11-01
+
+Base branch/HEAD: `feature/finance-recorder` / `a1042e91f7b8251d94664b5208509cb2dd18a788`. The working tree already contained the October 28 Money/description fix and unrelated, uncommitted ledger migration/tests/docs. The POM had exactly one Commons CSV dependency. No CI workflow existed. No finance ZIP was used. This follow-up remains uncommitted and does not implement persistent Phase 9.6.2.
+
+### Current result contract
+
+- `CsvImportResult(List<ImportRowOutcome> rows, List<ImportRowIssue> headerIssues)` holds one authoritative, source-ordered, immutable list. Header diagnostics remain separate from data records.
+- `ImportRowOutcome` carries source record number, `ACCEPTED / REVIEW_REQUIRED / REJECTED`, nullable allowlisted transaction date, occurred-at, description, positive amount magnitude, currency, EntryType, observed `DEBIT / CREDIT` direction, bank transaction ID, and safe issues. Invalid/unreliable fields are null; raw cells and unrelated columns are not retained.
+- `BankNormalizeResult(ImportRowOutcome outcome)` wraps that single row. Its existing `candidate()` and `issues()` methods are projections. Only accepted rows expose a complete `NormalizedImportRow`.
+- `acceptedRows()`, `rejectedIssues()`, and `reviewIssues()` remain derived compatibility views, not independently stored or supplied collections. `totalCount()`, `acceptedCount()`, `reviewRequiredCount()`, and `rejectedCount()` count rows, not issues.
+- Independent date, amount and description parsing preserves the other validated fields when one fails. Multiple issues still produce one rejected row. Complete accepted candidates still pass EntryValidator.
+- Both signs continue through the existing Money rules. Valid credits retain their facts and observed CREDIT direction, with `entryType=null`; they are not accepted ledger candidates. Invalid precision/overflow/description rejects a credit before review classification.
+- Known currency and a parsed nonzero source direction can remain even if Money rejects the magnitude. For example, `0.001` in CAD$ retains CAD/CREDIT but has `amount=null` and `REJECTED`: an observed sign is not proof of a valid monetary value.
+- Invalid headers or inconsistent row width retain only source/status/issues. Delimiter errors can shift columns, so guessing which positional cells remain reliable could assign the wrong financial facts.
+- File-level exceptions, UTF-8/CSV dialect, logical numbering, 2 MiB/5,000-record limits, 128-character amount bound, and Money invariants remain unchanged. Outcome diagnostic strings omit transaction facts; explicitly requested preview fields remain available.
+
+### Reproduction and actual verification
+
+Before changing production code, `CsvPreviewOutcomeTest.validCreditRetainsDisplayableFactsWithoutBecomingAnAcceptedEntry` serialized the old result and failed because date, description and amount were absent: **1 test, 1 failure, 0 errors, 0 skipped**, with three missing-field assertions. This was an executed assertion failure, not a compilation failure or a fabricated accepted-credit expectation. Local log: `/tmp/finguard-preview-red.log`.
+
+From `services/transaction-api`, the same Import-only command used by CI passed with database/AWS environment variables removed:
+
+```sh
+./mvnw --batch-mode --no-transfer-progress -Dtest='com.finguard.transactionapi.finance.importing.*Test' test
+```
+
+**59 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS; 4.263 s.** All previous 50 Import tests plus 9 new preview tests passed. Log: `/tmp/finguard-preview-import-tests.log`.
+
+Existing full local regression:
+
+```sh
+AWS_REGION=ca-central-1 python3 scripts/mvn-local.py test
+```
+
+**134 tests, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS; 13.049 s.** This includes the preexisting local PostgreSQL/ledger tests and migration files still outside the last commit. No volumes were reset. Log: `/tmp/finguard-preview-full-tests.log`.
+
+### CI coverage and unverified scope
+
+The earlier local draft `.github/workflows/import-tests.yml` (excluded from the closeout commit scope and deferred to the CI task) uses Java 21 and the Maven wrapper, read-only repository permission, path-filtered push/PR triggers and a manual trigger. It runs only tests in `com.finguard.transactionapi.finance.importing`; it does not start PostgreSQL, configure AWS credentials or run deployments. Maven still compiles the project/test sources before selecting these tests.
+
+YAML syntax/structure checks passed locally; actionlint was unavailable. The exact test command passed locally. **Remote GitHub CI is pending: no push, dispatch, or remote Run has occurred.** Runner/action integration and fresh remote dependency resolution remain unverified. Persistence, authentication, account association, classification, deduplication and confirmation are outside this feature.
+
+### Changed files
+
+Production: `BankNormalizeResult`, `CsvImportResult`, `CsvImportProcessor`, `RbcVisaCsvProfile`; new `ImportRowOutcome`, `ImportRowStatus`, `ImportSourceDirection`.
+Tests: new `CsvPreviewOutcomeTest`.
+CI: new `.github/workflows/import-tests.yml`.
+Docs: this report and [the remaining Phase 9.6.2 requirements](phase9_6_2_review_data_requirements.md).
+POM, Money, EntryValidator, parser, migrations and manual CRUD are unchanged by this follow-up.
+
+### Actual synthetic example
+
+Executed through the compiled CsvImportProcessor and serialized without a Spring context. Full local output: `/tmp/finguard-preview-example.json`.
+
+```csv
+Transaction Date,Description 1,CAD$,USD$
+11/1/2026,Cafe,-10.00,
+11/1/2026,Credit,5.00,
+2/30/2026,Shop,-3.50,
+11/1/2026,Lossy credit,0.001,
+```
+
+| Source | Status | Date | Description | Amount | Currency | Direction | EntryType | Issues |
+| ---: | --- | --- | --- | ---: | --- | --- | --- | --- |
+| 2 | ACCEPTED | 2026-11-01 | Cafe | 10.00 | CAD | DEBIT | EXPENSE | none |
+| 3 | REVIEW_REQUIRED | 2026-11-01 | Credit | 5.00 | CAD | CREDIT | null | REVIEW_REQUIRED |
+| 4 | REJECTED | null | Shop | 3.50 | CAD | DEBIT | EXPENSE | INVALID_DATE |
+| 5 | REJECTED | 2026-11-01 | Lossy credit | null | CAD | CREDIT | null | INVALID_AMOUNT |
+
+Summary: total=4, accepted=1, review-required=1, rejected=2. Each data source record appears exactly once.
+
+### New test names (all passed)
+
+- `mixedInputPreservesSourceOrderAndCountsRowsInsteadOfIssues`
+- `rejectsDuplicateOutOfOrderOrMisattributedSourceRecords`
+- `headerAndWidthErrorsDoNotGuessTransactionFieldsOrCountHeadersAsData`
+- `validCreditRetainsDisplayableFactsWithoutBecomingAnAcceptedEntry`
+- `diagnosticsDoNotLeakRetainedOrRejectedSyntheticSensitiveValues(CapturedOutput)`
+- `immutableAuthoritativeRowsKeepDerivedViewsAndCountsConsistent`
+- `invalidDescriptionsBecomeNullWithoutLosingOtherFactsForEitherSign`
+- `invalidDateRetainsOtherValidatedTransactionFacts`
+- `invalidPositiveAmountsRemainRejectedWhileKnownCurrencyAndDirectionSurvive`
+
+<details>
+<summary>Historical verification through 2026-10-29 (superseded by the current follow-up above)</summary>
+
 Verification date: 2026-10-28 (targeted review fix; original slice verified 2026-10-25). Branch: `feature/finance-recorder`.
 Starting and final commit: `258ab0f04bc453bdf56192e0e996e53a370a48e0`.
 This report records verification before the user-authorized commit, not a release or deployment.
@@ -244,3 +332,5 @@ Only these six files changed from the pre-fix baseline. No Money/domain classes,
 The CSV commit includes the complete Phase 9.6.1 import package, its tests, the Commons CSV dependency and these import documents. A duplicate Commons CSV dependency declaration was removed during diff review. The full working-tree wrapper test run after deduplication passed on 2026-10-29: 125 tests, 0 failures/errors/skips, BUILD SUCCESS, Maven elapsed 35.114 s (local log: /tmp/finguard-961-precommit-maven.log).
 
 The 125-test verification totals refer to the full local working tree. Previously implemented ledger regression tests, the V3 ledger-version migration and the corresponding schema-test update remain outside this CSV commit, along with older Phase 9.3 documents and the local finance.zip archive. In particular, a fresh checkout cannot reproduce the existing PostgreSQL/CRUD regression results until that earlier migration/test work is committed separately. No files were deleted or database volumes reset.
+
+</details>

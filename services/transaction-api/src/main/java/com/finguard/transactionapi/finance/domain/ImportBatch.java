@@ -1,6 +1,7 @@
 package com.finguard.transactionapi.finance.domain;
 
 import jakarta.persistence.*;
+import com.finguard.transactionapi.finance.importing.BankType;
 import java.util.UUID;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -27,6 +28,10 @@ public class ImportBatch {
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 15)
     private ImportStatus status;
+    // NULL denotes historical batches whose bank format was not recorded.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "bank_type", length = 30)
+    private BankType bankType;
     @Version
     @Column(name = "version", nullable = false)
     private long version;
@@ -51,6 +56,18 @@ public class ImportBatch {
 
     protected ImportBatch() {}
 
+    /** Complete confirmation once. The normal dirty update, not a forced increment, advances @Version. */
+    public void markConfirmed(int confirmedCount, int notImportedCount, Instant confirmedAt) {
+        if (status != ImportStatus.REVIEWING || confirmedCount < 1 || notImportedCount < 0) {
+            throw new IllegalStateException("Invalid import confirmation transition");
+        }
+        this.confirmedAt = java.util.Objects.requireNonNull(confirmedAt);
+        this.closedAt = confirmedAt;
+        this.confirmedCount = confirmedCount;
+        this.excludedCount = notImportedCount;
+        this.status = ImportStatus.CONFIRMED;
+    }
+
     public UUID getId() { return id; }
 
     public UUID getUserId() { return userId; }
@@ -64,6 +81,8 @@ public class ImportBatch {
     public String getFileSha256() { return fileSha256; }
 
     public ImportStatus getStatus() { return status; }
+
+    public BankType getBankType() { return bankType; }
 
     public long getVersion() { return version; }
 

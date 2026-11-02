@@ -18,6 +18,7 @@ public enum ImportIssueCode {
     AMBIGUOUS_CURRENCY("Record contains amounts in both currency columns."),
     REVIEW_REQUIRED("Positive credit requires review of its transaction meaning."),
     INVALID_CURRENCY("Currency must be a recognized uppercase three-letter code."),
+    ACCOUNT_CURRENCY_MISMATCH("Transaction currency does not match the financial account currency."),
     INVALID_ENTRY_TYPE("Entry type is required."),
     INVALID_DESCRIPTION("Description must contain text and be at most 500 characters.");
 

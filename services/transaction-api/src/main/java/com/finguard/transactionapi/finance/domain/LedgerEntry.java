@@ -88,6 +88,17 @@ public class LedgerEntry {
         return entry;
     }
 
+    /** Imported entries retain durable batch/row provenance; current RBC input has no trusted bank ID. */
+    public static LedgerEntry imported(UUID userId, UUID accountId, UUID sourceBatchId, int sourceRowNumber,
+            UUID categoryId, EntryType entryType, Money money, LocalDate transactionDate,
+            Instant occurredAt, String description) {
+        if (sourceRowNumber < 1) throw new IllegalArgumentException("Invalid source row number");
+        var entry = manual(userId, accountId, categoryId, entryType, money, transactionDate, occurredAt, description);
+        entry.sourceBatchId = java.util.Objects.requireNonNull(sourceBatchId);
+        entry.sourceRowNumber = sourceRowNumber;
+        return entry;
+    }
+
     /** Full replacement of editable fields; Hibernate alone manages the version. */
     public void replaceEditableFields(UUID categoryId, EntryType entryType, Money money,
             LocalDate transactionDate, Instant occurredAt, String description) {

@@ -33,7 +33,7 @@ class FinanceSchemaIntegrationTest {
         schema = "finance_test_" + UUID.randomUUID().toString().replace("-", "");
         var flyway = Flyway.configure().dataSource(url, user, password).schemas(schema)
                 .defaultSchema(schema).locations("classpath:db/migration").load();
-        assertEquals(2, flyway.migrate().migrationsExecuted);
+        assertEquals(4, flyway.migrate().migrationsExecuted);
         flyway.validate();
         execute("SET search_path TO " + schema);
         execute("INSERT INTO app_user(id,auth_subject,display_name) VALUES (?, 'fixture-a', 'A'), (?, 'fixture-b', 'B')", OWNER, OTHER);

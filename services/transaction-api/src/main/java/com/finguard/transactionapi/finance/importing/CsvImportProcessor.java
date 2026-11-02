@@ -25,29 +25,20 @@ public final class CsvImportProcessor {
             case RBC_VISA -> new RbcVisaCsvProfile();
         };
         HeaderValidationResult headers = profile.validateHeaders(csv.headers());
-        List<NormalizedImportRow> accepted = new ArrayList<>();
-        List<ImportRowIssue> rejected = new ArrayList<>(headers.issues());
-        List<ImportRowIssue> review = new ArrayList<>();
-        if (!headers.isValid()) {
-            for (ParsedCsvRow row : csv.rows()) {
-                rejected.add(new ImportRowIssue(row.sourceRowNumber(), ImportIssueCode.INVALID_HEADERS));
-            }
-            return new CsvImportResult(accepted, rejected, review);
-        }
-
+        List<ImportRowOutcome> outcomes = new ArrayList<>();
         for (ParsedCsvRow row : csv.rows()) {
-            BankNormalizeResult normalized = profile.normalize(row, headers);
-            for (ImportRowIssue issue : normalized.issues()) {
-                if (issue.code() == ImportIssueCode.REVIEW_REQUIRED) review.add(issue);
-                else rejected.add(issue);
+            if (!headers.isValid()) {
+                outcomes.add(ImportRowOutcome.structuralRejection(row.sourceRowNumber(),
+                        ImportIssueCode.INVALID_HEADERS));
+                continue;
             }
-            if (normalized.candidate().isPresent()) {
-                NormalizedImportRow candidate = normalized.candidate().orElseThrow();
-                EntryValidationResult validation = validator.validate(candidate);
-                if (validation.isValid()) accepted.add(candidate);
-                else rejected.addAll(validation.issues());
+            ImportRowOutcome outcome = profile.normalize(row, headers).outcome();
+            if (outcome.candidate().isPresent()) {
+                EntryValidationResult validation = validator.validate(outcome.candidate().orElseThrow());
+                if (!validation.isValid()) outcome = outcome.reject(validation.issues());
             }
+            outcomes.add(outcome);
         }
-        return new CsvImportResult(accepted, rejected, review);
+        return new CsvImportResult(outcomes, headers.issues());
     }
 }

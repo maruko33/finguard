@@ -1,6 +1,8 @@
 # Phase 9.6.2 — Reviewable positive-credit data requirements
 
-Status: required follow-up for the future persistent import preview; **not implemented** in Phase 9.6.1.
+Status at closeout (2026-11-01): internal persisted preview, manual review and atomic confirmation are now implemented in the working tree. The [Import closeout verification](import_acceptance_closeout.md) records the current executed result. Valid positive credits retain facts and CREDIT direction with null EntryType and remain ineligible for confirmation.
+
+The original design note below is historical: statements about future/unimplemented persistence and confirmation describe its earlier scope, not the current implementation.
 Recorded: 2026-10-28, following the Phase 9.6.1 targeted credit-validation review.
 
 ## Required behavior
@@ -15,7 +17,7 @@ The future review representation must preserve:
 - The observed credit direction/sign, separately from its unresolved business classification.
 - Review status and safe, structured reason codes associated with that same transaction.
 
-Do not assign a provisional INCOME or EXPENSE merely to fit `NormalizedImportRow` or permit ledger insertion. Payment/refund/income interpretation remains unresolved until the reviewed confirmation rules support it. A new review-data representation or extension of the normalization result needs its own design review; this note does not prescribe a persistence schema.
+Do not assign a provisional INCOME or EXPENSE merely to fit `NormalizedImportRow` or permit ledger insertion. Payment/refund/income interpretation remains unresolved until the reviewed confirmation rules support it. The current in-memory ImportRowOutcome now preserves these facts and leaves positive-credit EntryType null. Persistent ownership, schema and confirmation design still require their own review; this note does not prescribe a persistence schema.
 
 ## Validation and privacy requirements
 
@@ -33,4 +35,4 @@ Do not assign a provisional INCOME or EXPENSE merely to fit `NormalizedImportRow
 4. Safe reason codes remain associated with the structured transaction, without raw sensitive input in diagnostics.
 5. Ownership checks and data-minimization tests cover the future persistent representation.
 
-Phase 9.6.1 currently returns issue-only review outcomes in memory. This known limitation is documented for Phase 9.6.2; no persistence, controller, classifier or confirmation workflow is added by the targeted fix.
+The 2026-11-01 follow-up now returns one structured in-memory outcome for every accepted, review-required or rejected data record. Valid credits retain their details and source direction without a fabricated EntryType; rejected rows retain independently reliable fields with invalid fields null. Phase 9.6.2 must carry this structured data through persistent preview instead of reducing it back to issue codes alone. Persistence/retrieval, trusted ownership enforcement and confirmation remain unimplemented; no controller, classifier or confirmation workflow was added.

@@ -7,6 +7,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.format.ResolverStyle;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -64,65 +65,85 @@ public final class RbcVisaCsvProfile implements BankCsvProfile {
         Objects.requireNonNull(headers, "headers");
         long sourceRowNumber = row.sourceRowNumber();
         if (!headers.isValid()) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.INVALID_HEADERS);
+            return new BankNormalizeResult(ImportRowOutcome.structuralRejection(
+                    sourceRowNumber, ImportIssueCode.INVALID_HEADERS));
         }
         if (row.values().size() != headers.columnIndexes().size()) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.COLUMN_COUNT_MISMATCH);
+            // A missing/extra delimiter can shift fields; do not guess which cells still align.
+            return new BankNormalizeResult(ImportRowOutcome.structuralRejection(
+                    sourceRowNumber, ImportIssueCode.COLUMN_COUNT_MISMATCH));
         }
 
-        LocalDate transactionDate;
+        List<ImportRowIssue> issues = new ArrayList<>();
+        LocalDate transactionDate = null;
         String dateText = value(row, headers, "Transaction Date");
-        if (!DATE_SHAPE.matcher(dateText).matches()) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.INVALID_DATE);
-        }
-        try {
-            transactionDate = LocalDate.parse(dateText, DATE_FORMAT);
-            if (transactionDate.getYear() < 1) {
-                return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.INVALID_DATE);
+        if (DATE_SHAPE.matcher(dateText).matches()) {
+            try {
+                LocalDate parsed = LocalDate.parse(dateText, DATE_FORMAT);
+                if (parsed.getYear() >= 1) transactionDate = parsed;
+            } catch (DateTimeParseException exception) {
+                // Keep only a safe issue; other fields are parsed independently below.
             }
-        } catch (DateTimeParseException exception) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.INVALID_DATE);
+        }
+        if (transactionDate == null) {
+            issues.add(new ImportRowIssue(sourceRowNumber, ImportIssueCode.INVALID_DATE));
         }
 
         String cad = value(row, headers, "CAD$");
         String usd = value(row, headers, "USD$");
+        String currencyCode = null;
+        BigDecimal amount = null;
+        ImportSourceDirection direction = null;
+        EntryType entryType = null;
         if (!cad.isEmpty() && !usd.isEmpty()) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.AMBIGUOUS_CURRENCY);
-        }
-        String amountText = cad.isEmpty() ? usd : cad;
-        // Bound arbitrary-precision conversion work independently of the whole-file byte limit.
-        if (amountText.length() > MAX_AMOUNT_TEXT_LENGTH) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.AMOUNT_TOO_LONG);
-        }
-        if (!AMOUNT_SHAPE.matcher(amountText).matches()) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.INVALID_AMOUNT);
-        }
-        BigDecimal signedAmount;
-        try {
-            signedAmount = new BigDecimal(amountText);
-        } catch (NumberFormatException exception) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.INVALID_AMOUNT);
-        }
-        String currencyCode = cad.isEmpty() ? "USD" : "CAD";
-        BigDecimal magnitude = signedAmount.abs();
-        try {
-            // Validate both signs with the domain rules before classifying; keep the original scale.
-            new Money(magnitude, currencyCode);
-        } catch (ArithmeticException | IllegalArgumentException exception) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.INVALID_AMOUNT);
+            issues.add(new ImportRowIssue(sourceRowNumber, ImportIssueCode.AMBIGUOUS_CURRENCY));
+        } else if (cad.isEmpty() && usd.isEmpty()) {
+            issues.add(new ImportRowIssue(sourceRowNumber, ImportIssueCode.INVALID_AMOUNT));
+        } else {
+            // The populated column identifies currency independently of amount correctness.
+            currencyCode = cad.isEmpty() ? "USD" : "CAD";
+            String amountText = cad.isEmpty() ? usd : cad;
+            if (amountText.length() > MAX_AMOUNT_TEXT_LENGTH) {
+                issues.add(new ImportRowIssue(sourceRowNumber, ImportIssueCode.AMOUNT_TOO_LONG));
+            } else if (!AMOUNT_SHAPE.matcher(amountText).matches()) {
+                issues.add(new ImportRowIssue(sourceRowNumber, ImportIssueCode.INVALID_AMOUNT));
+            } else {
+                BigDecimal signedAmount = new BigDecimal(amountText);
+                if (signedAmount.signum() != 0) {
+                    direction = signedAmount.signum() > 0
+                            ? ImportSourceDirection.CREDIT : ImportSourceDirection.DEBIT;
+                }
+                BigDecimal magnitude = signedAmount.abs();
+                try {
+                    // Both signs use the existing domain invariants before any review classification.
+                    new Money(magnitude, currencyCode);
+                    amount = magnitude; // Preserve exact value and scale; no rounding.
+                    if (direction == ImportSourceDirection.DEBIT) entryType = EntryType.EXPENSE;
+                } catch (ArithmeticException | IllegalArgumentException exception) {
+                    issues.add(new ImportRowIssue(sourceRowNumber, ImportIssueCode.INVALID_AMOUNT));
+                }
+            }
         }
 
-        String description1 = value(row, headers, "Description 1");
-        String description2 = value(row, headers, "Description 2");
-        String description = (description1 + " " + description2).strip();
+        String description = (value(row, headers, "Description 1") + " "
+                + value(row, headers, "Description 2")).strip();
         if (!EntryValidator.validDescription(description)) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.INVALID_DESCRIPTION);
+            description = null;
+            issues.add(new ImportRowIssue(sourceRowNumber, ImportIssueCode.INVALID_DESCRIPTION));
         }
-        if (signedAmount.signum() > 0) {
-            return BankNormalizeResult.issue(sourceRowNumber, ImportIssueCode.REVIEW_REQUIRED);
+
+        ImportRowStatus status;
+        if (!issues.isEmpty()) {
+            status = ImportRowStatus.REJECTED;
+        } else if (direction == ImportSourceDirection.CREDIT) {
+            status = ImportRowStatus.REVIEW_REQUIRED;
+            issues.add(new ImportRowIssue(sourceRowNumber, ImportIssueCode.REVIEW_REQUIRED));
+        } else {
+            status = ImportRowStatus.ACCEPTED;
         }
-        return BankNormalizeResult.candidate(new NormalizedImportRow(sourceRowNumber,
-                transactionDate, null, description, magnitude, currencyCode, EntryType.EXPENSE, null));
+        return new BankNormalizeResult(new ImportRowOutcome(sourceRowNumber, status,
+                transactionDate, null, description, amount, currencyCode, entryType,
+                direction, null, issues));
     }
 
     private static String value(ParsedCsvRow row, HeaderValidationResult headers, String name) {
