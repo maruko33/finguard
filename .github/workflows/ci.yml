@@ -26,5 +26,5 @@ jobs:
           java-version: "21"
 
       - name: Run Transaction API test
-        working-directory: service/transaction-api
+        working-directory: services/transaction-api
         run: ./mvnw clean test
