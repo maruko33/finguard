@@ -15,6 +15,24 @@ jobs:
   transaction-api:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:17
+
+
+        env:
+          POSTGRES_DB: finguard
+          POSTGRES_USER: finguard
+          POSTGRES_PASSWORD: finguard_test
+
+        ports:
+          - 5432:5432
+
+        options: >-
+          --health-cmd "pg_isready -U finguard -d finguard"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -27,4 +45,8 @@ jobs:
 
       - name: Run Transaction API test
         working-directory: services/transaction-api
+        env:
+          DB_URL: jdbc:postgresql://localhost:5432/finguard
+          DB_USERNAME: finguard
+          DB_PASSWORD: finguard_test
         run: ./mvnw clean test
