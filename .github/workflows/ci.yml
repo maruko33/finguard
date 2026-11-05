@@ -130,3 +130,23 @@ jobs:
             -f compose.yaml \
             -f compose.ci.yaml \
             down -v
+
+  risk-worker:
+    runs-on: ubuntu-latest
+
+    steps:
+          - name: Checkout repository
+            uses: actions/checkout@v7
+
+          - name: Set up Python
+            uses: actions/setup-python@v6
+            with:
+              python-version: "3.12"
+
+          - name: Install dependencies
+            working-directory: services/risk-worker
+            run: pip install -r requirements.txt
+
+          - name: Run Risk Worker tests
+            working-directory: services/risk-worker
+            run: pytest
