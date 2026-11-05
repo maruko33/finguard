@@ -104,3 +104,29 @@ jobs:
         if: always()
         run: |
           docker rm -f finguard-transaction-api-ci || true 
+
+  compose-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start FinGuard integration environment
+        run: |
+          docker compose \
+            -f compose.yaml \
+            -f compose.ci.yaml \
+            up -d --build postgres transaction-api
+
+      - name: Smoke test
+        run: |
+          # wait
+          curl http://localhost:8080/api/v1/health
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose \
+            -f compose.yaml \
+            -f compose.ci.yaml \
+            down -v
