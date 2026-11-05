@@ -66,3 +66,36 @@ jobs:
             docker build \
               -t finguard-transaction-api:${{ github.sha }} \
               .
+
+      - name: Start Transaction API container
+        run: |
+          docker run -d \
+            --name finguard-transaction-api-ci \
+            --add-host=host.docker.internal:host-gateway \
+            -p 8080:8080 \
+            -e DB_URL=jdbc:postgresql://host.docker.internal:5432/finguard \
+            -e DB_USERNAME=finguard \
+            -e DB_PASSWORD=finguard_test \
+            -e AWS_REGION=ca-central-1 \
+            -e AWS_DEFAULT_REGION=ca-central-1 \
+            -e AWS_ACCESS_KEY_ID=test \
+            -e AWS_SECRET_ACCESS_KEY=test \
+            -e AWS_EC2_METADATA_DISABLED=true \
+            -e SQS_QUEUE_URL=https://sqs.ca-central-1.amazonaws.com/000000000000/finguard-test \
+            finguard-transaction-api:${{ github.sha }}
+
+      - name: Smoke test Transaction API
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8080/api/v1/health; then
+              echo "Transaction API is healthy"
+              exit 0
+            fi
+
+            echo "Waiting for Transaction API..."
+            sleep 2
+          done
+
+          echo "Transaction API failed to become healthy"
+          docker logs finguard-transaction-api-ci
+          exit 1
