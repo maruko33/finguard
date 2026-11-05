@@ -99,3 +99,8 @@ jobs:
           echo "Transaction API failed to become healthy"
           docker logs finguard-transaction-api-ci
           exit 1
+
+      - name: Clean up Transaction API container
+        if: always()
+        run: |
+          docker rm -f finguard-transaction-api-ci || true 
