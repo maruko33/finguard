@@ -1,0 +1,80 @@
+@startuml
+' Phase 9 — Proposed Backend Class Design, focused on services and ports.
+' Dependencies are representative; not all DTOs/framework types shown.
+left to right direction
+hide circle
+skinparam classAttributeIconSize 0
+
+package "Finance API (Spring Boot)" {
+  class LedgerEntryController <<REST>>
+  class ImportController <<REST>>
+  class ReportController <<REST>>
+
+  class LedgerEntryService {
+    +create(request: CreateEntryRequest): EntryResponse
+    +update(id: UUID, request: UpdateEntryRequest): EntryResponse
+    +delete(id: UUID): void
+    +list(filter: EntryFilter): Page<EntryResponse>
+  }
+
+  class ImportService {
+    +preview(file: CSV, userId: UUID): ImportPreview
+    +confirm(batchId: UUID, selection: Selection): ImportResult
+  }
+
+  class ReportingService {
+    +monthly(period: YearMonth, userId: UUID): MonthlySummary
+  }
+  class EntryValidator
+  class DuplicateDetector
+  interface EntryClassifier {
+    +suggest(candidate: EntryCandidate): CategorySuggestion
+  }
+  class RuleBasedEntryClassifier
+  class AiEntryClassifier <<later increment>>
+  interface ImportParser {
+    +parse(file: CSV): List<ImportCandidate>
+  }
+  class CsvImportParser
+  interface LedgerEntryRepository
+  interface ImportBatchRepository
+  interface CategoryRepository
+}
+
+package "Core Finance Domain" {
+  class LedgerEntry <<Entity>>
+  class ImportBatch <<Entity>>
+  class ImportCandidate <<Entity>>
+  class Category <<Entity>>
+}
+
+LedgerEntryController --> LedgerEntryService
+ImportController --> ImportService
+ReportController --> ReportingService
+LedgerEntryService --> LedgerEntryRepository
+LedgerEntryService --> EntryValidator
+LedgerEntryService --> CategoryRepository
+ImportService --> ImportParser
+ImportService --> EntryValidator
+ImportService --> DuplicateDetector
+ImportService --> EntryClassifier
+ImportService --> ImportBatchRepository
+ImportService --> LedgerEntryRepository
+ReportingService --> LedgerEntryRepository
+RuleBasedEntryClassifier ..|> EntryClassifier
+AiEntryClassifier ..|> EntryClassifier
+CsvImportParser ..|> ImportParser
+LedgerEntryRepository ..> LedgerEntry
+ImportBatchRepository ..> ImportBatch
+ImportBatch *-- ImportCandidate
+CategoryRepository ..> Category
+
+note bottom of ReportingService
+Returns aggregate data DTOs only;
+Angular renders the charts.
+end note
+note bottom of AiEntryClassifier
+Later, optional provider adapter.
+Manual/rule-based flows must work without AI.
+end note
+@enduml
