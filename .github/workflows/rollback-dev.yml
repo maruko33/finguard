@@ -15,10 +15,10 @@ permissions:
 concurrency:
   group: finguard-dev-deployment
   cancel-in-progress: false
-  queue: max
 
 env:
   AWS_REGION: ca-central-1
+  ECR_REPOSITORY: finguard-transaction-api
 
   ECS_CLUSTER: finguard-cluster
   ECS_SERVICE: finguard-transaction-api
@@ -29,9 +29,11 @@ env:
 jobs:
   rollback:
     if: github.ref == 'refs/heads/main' && vars.DEV_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: dev
 
-  environment:
-    name: dev
     steps:
       - name: Authenticate to AWS with OIDC
         uses: aws-actions/configure-aws-credentials@v6.3.0
@@ -54,14 +56,35 @@ jobs:
         env:
           TARGET_REVISION: ${{ inputs.task_revision }}
         run: |
+          if [[ ! "$TARGET_REVISION" =~ ^[1-9][0-9]*$ ]]; then
+            echo "task_revision must be a positive revision number"
+            exit 1
+          fi
+
           TARGET_TASK_DEFINITION="$ECS_TASK_DEFINITION_FAMILY:$TARGET_REVISION"
-
-          echo "Rollback target:"
-          echo "$TARGET_TASK_DEFINITION"
-
-          aws ecs describe-task-definition \
+          TARGET_IMAGE=$(aws ecs describe-task-definition \
             --task-definition "$TARGET_TASK_DEFINITION" \
-            > /dev/null
+            --query 'taskDefinition.containerDefinitions[?name==`transaction-api`].image | [0]' \
+            --output text)
+
+          # A registered revision is unusable if its image was deleted from ECR.
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          EXPECTED_IMAGE_PREFIX="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY"
+          case "$TARGET_IMAGE" in
+            "$EXPECTED_IMAGE_PREFIX"@sha256:*) IMAGE_ID="imageDigest=${TARGET_IMAGE#*@}" ;;
+            "$EXPECTED_IMAGE_PREFIX":*) IMAGE_ID="imageTag=${TARGET_IMAGE##*:}" ;;
+            *) echo "Rollback target does not reference the expected ECR repository"; exit 1 ;;
+          esac
+          IMAGE_COUNT=$(aws ecr batch-get-image \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids "$IMAGE_ID" \
+            --query 'length(images)' \
+            --output text)
+          if [[ "$IMAGE_COUNT" != "1" ]]; then
+            echo "Rollback image is unavailable; no service update performed"
+            exit 1
+          fi
+          echo "Validated rollback target: $TARGET_TASK_DEFINITION"
 
       - name: Roll back ECS service
         env:
@@ -95,7 +118,7 @@ jobs:
           echo "Testing http://$ALB_DNS/api/v1/health"
 
           for i in {1..30}; do
-            if curl -fsS "http://$ALB_DNS/api/v1/health"; then
+            if curl --connect-timeout 5 --max-time 10 -fsS "http://$ALB_DNS/api/v1/health"; then
               echo
               echo "Rollback smoke test passed"
               exit 0
@@ -107,3 +130,12 @@ jobs:
 
           echo "Rollback smoke test failed"
           exit 1
+
+      - name: Show ECS events on failure
+        if: failure()
+        run: |
+          aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].events[:5]' \
+            --output table
