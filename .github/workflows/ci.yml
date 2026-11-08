@@ -1,0 +1,152 @@
+name: FinGuard CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  transaction-api:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+
+
+        env:
+          POSTGRES_DB: finguard
+          POSTGRES_USER: finguard
+          POSTGRES_PASSWORD: finguard_test
+
+        ports:
+          - 5432:5432
+
+        options: >-
+          --health-cmd "pg_isready -U finguard -d finguard"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Test and package Transaction API
+          working-directory: services/transaction-api
+          env:
+            DB_URL: jdbc:postgresql://localhost:5432/finguard
+            DB_USERNAME: finguard
+            DB_PASSWORD: finguard_test
+
+            AWS_REGION: ca-central-1
+            AWS_DEFAULT_REGION: ca-central-1
+            AWS_ACCESS_KEY_ID: test
+            AWS_SECRET_ACCESS_KEY: test
+            AWS_EC2_METADATA_DISABLED: "true"
+
+            SQS_QUEUE_URL: https://sqs.ca-central-1.amazonaws.com/000000000000/finguard-test
+
+          run: ./mvnw clean verify
+
+      - name: Build Transaction API Docker image
+          working-directory: services/transaction-api
+          run: |
+            docker build \
+              -t finguard-transaction-api:${{ github.sha }} \
+              .
+
+      - name: Start Transaction API container
+        run: |
+          docker run -d \
+            --name finguard-transaction-api-ci \
+            --add-host=host.docker.internal:host-gateway \
+            -p 8080:8080 \
+            -e DB_URL=jdbc:postgresql://host.docker.internal:5432/finguard \
+            -e DB_USERNAME=finguard \
+            -e DB_PASSWORD=finguard_test \
+            -e AWS_REGION=ca-central-1 \
+            -e AWS_DEFAULT_REGION=ca-central-1 \
+            -e AWS_ACCESS_KEY_ID=test \
+            -e AWS_SECRET_ACCESS_KEY=test \
+            -e AWS_EC2_METADATA_DISABLED=true \
+            -e SQS_QUEUE_URL=https://sqs.ca-central-1.amazonaws.com/000000000000/finguard-test \
+            finguard-transaction-api:${{ github.sha }}
+
+      - name: Smoke test Transaction API
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8080/api/v1/health; then
+              echo "Transaction API is healthy"
+              exit 0
+            fi
+
+            echo "Waiting for Transaction API..."
+            sleep 2
+          done
+
+          echo "Transaction API failed to become healthy"
+          docker logs finguard-transaction-api-ci
+          exit 1
+
+      - name: Clean up Transaction API container
+        if: always()
+        run: |
+          docker rm -f finguard-transaction-api-ci || true 
+
+  compose-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start FinGuard integration environment
+        run: |
+          docker compose \
+            -f compose.yaml \
+            -f compose.ci.yaml \
+            up -d --build postgres transaction-api
+
+      - name: Smoke test
+        run: |
+          # wait
+          curl http://localhost:8080/api/v1/health
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose \
+            -f compose.yaml \
+            -f compose.ci.yaml \
+            down -v
+
+  risk-worker:
+    runs-on: ubuntu-latest
+
+    steps:
+          - name: Checkout repository
+            uses: actions/checkout@v7
+
+          - name: Set up Python
+            uses: actions/setup-python@v6
+            with:
+              python-version: "3.12"
+
+          - name: Install dependencies
+            working-directory: services/risk-worker
+            run: pip install -r requirements.txt
+
+          - name: Run Risk Worker tests
+            working-directory: services/risk-worker
+            run: pytest

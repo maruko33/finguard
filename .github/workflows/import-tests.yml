@@ -1,0 +1,47 @@
+name: Import component tests
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/import-tests.yml'
+      - 'services/transaction-api/pom.xml'
+      - 'services/transaction-api/mvnw'
+      - 'services/transaction-api/.mvn/**'
+      - 'services/transaction-api/src/main/java/com/finguard/transactionapi/finance/importing/**'
+      - 'services/transaction-api/src/main/java/com/finguard/transactionapi/finance/domain/Money.java'
+      - 'services/transaction-api/src/main/java/com/finguard/transactionapi/finance/domain/EntryType.java'
+      - 'services/transaction-api/src/test/java/com/finguard/transactionapi/finance/importing/**'
+  push:
+    paths:
+      - '.github/workflows/import-tests.yml'
+      - 'services/transaction-api/pom.xml'
+      - 'services/transaction-api/mvnw'
+      - 'services/transaction-api/.mvn/**'
+      - 'services/transaction-api/src/main/java/com/finguard/transactionapi/finance/importing/**'
+      - 'services/transaction-api/src/main/java/com/finguard/transactionapi/finance/domain/Money.java'
+      - 'services/transaction-api/src/main/java/com/finguard/transactionapi/finance/domain/EntryType.java'
+      - 'services/transaction-api/src/test/java/com/finguard/transactionapi/finance/importing/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  import-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/transaction-api
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: services/transaction-api/pom.xml
+      - name: Run Import tests only
+        run: ./mvnw --batch-mode --no-transfer-progress -Dtest='com.finguard.transactionapi.finance.importing.*Test' test
