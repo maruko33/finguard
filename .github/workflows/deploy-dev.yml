@@ -1,0 +1,128 @@
+name: Deploy Dev
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/transaction-api/**"
+      - ".github/workflows/deploy-dev.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: finguard-dev-deployment
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ca-central-1
+  ECR_REPOSITORY: finguard-transaction-api
+
+  ECS_CLUSTER: finguard-cluster
+  ECS_SERVICE: finguard-transaction-api
+  ECS_TASK_DEFINITION_FAMILY: finguard-transaction-api
+  CONTAINER_NAME: transaction-api
+
+  ALB_NAME: finguard-alb
+
+jobs:
+  publish-transaction-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.ref == 'refs/heads/main' && vars.DEV_DEPLOY_ENABLED == 'true'
+
+    environment:
+      name: dev
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Package Transaction API
+        working-directory: services/transaction-api
+        run: ./mvnw --batch-mode --no-transfer-progress clean package -DskipTests
+
+      - name: Authenticate to AWS with OIDC
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Transaction API image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          docker build \
+            -t "$IMAGE" \
+            services/transaction-api
+
+          docker push "$IMAGE"
+
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Render ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition-family: ${{ env.ECS_TASK_DEFINITION_FAMILY }}
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy Transaction API to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          wait-max-delay-seconds: 15
+
+      - name: Smoke test deployed Transaction API
+        run: |
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names "$ALB_NAME" \
+            --region "$AWS_REGION" \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+
+          echo "Testing http://$ALB_DNS/api/v1/health"
+
+          for i in {1..30}; do
+            if curl --connect-timeout 5 --max-time 10 -fsS "http://$ALB_DNS/api/v1/health"; then
+              echo
+              echo "Deployment smoke test passed"
+              exit 0
+            fi
+
+            echo "Health check attempt $i failed"
+            sleep 10
+          done
+
+          echo "Deployment smoke test failed"
+
+          aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --region "$AWS_REGION" \
+            --query 'services[0].events[:5]' \
+            --output table
+
+          exit 1
