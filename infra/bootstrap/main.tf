@@ -242,6 +242,16 @@ data "aws_iam_policy_document" "github_deploy" {
       local.transaction_api_ecr_arn
     ]
   }
+  statement {
+    sid    = "ReadLoadBalancer"
+    effect = "Allow"
+
+    actions = [
+      "elasticloadbalancing:DescribeLoadBalancers"
+    ]
+
+    resources = ["*"]
+  }
 
   statement {
     sid    = "RegisterTransactionApiTaskDefinition"
