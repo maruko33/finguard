@@ -200,7 +200,7 @@ data "aws_iam_policy_document" "github_deploy_assume" {
       variable = "token.actions.githubusercontent.com:sub"
 
       values = [
-        "${local.github_subject_prefix}:ref:refs/heads/main"
+        "${local.github_subject_prefix}:environment:dev"
       ]
     }
   }
