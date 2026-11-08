@@ -23,7 +23,18 @@ locals {
   state_key = "finguard/dev/terraform.tfstate"
 
   github_subject_prefix = "repo:${var.github_owner}@${var.github_owner_id}/${var.github_repo}@${var.github_repo_id}"
+
+  transaction_api_ecr_arn = "arn:aws:ecr:${var.aws_region}:${data.aws_caller_identity.current.account_id}:repository/finguard-transaction-api"
+
+  transaction_api_ecs_service_arn = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/finguard-cluster/finguard-transaction-api"
+
+  transaction_api_task_definition_arn = "arn:aws:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/finguard-transaction-api:*"
+
+  ecs_execution_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/finguard-ecs-execution-role"
+
+  transaction_api_task_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/finguard-transaction-api-task-role"
 }
+
 
 #add S3 State Bucket
 resource "aws_s3_bucket" "terraform_state" {
@@ -157,4 +168,148 @@ resource "aws_iam_role_policy" "github_terraform_state" {
   role = aws_iam_role.github_terraform_plan.id
 
   policy = data.aws_iam_policy_document.github_terraform_state.json
+}
+
+data "aws_iam_policy_document" "github_deploy_assume" {
+  statement {
+    effect = "Allow"
+
+    actions = [
+      "sts:AssumeRoleWithWebIdentity"
+    ]
+
+    principals {
+      type = "Federated"
+
+      identifiers = [
+        aws_iam_openid_connect_provider.github.arn
+      ]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+
+      values = [
+        "sts.amazonaws.com"
+      ]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+
+      values = [
+        "${local.github_subject_prefix}:ref:refs/heads/main"
+      ]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_deploy" {
+  name = "finguard-github-deploy"
+
+  assume_role_policy = data.aws_iam_policy_document.github_deploy_assume.json
+}
+
+data "aws_iam_policy_document" "github_deploy" {
+
+  statement {
+    sid    = "ECRAuthorization"
+    effect = "Allow"
+
+    actions = [
+      "ecr:GetAuthorizationToken"
+    ]
+
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "PushTransactionApiImage"
+    effect = "Allow"
+
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchGetImage",
+      "ecr:CompleteLayerUpload",
+      "ecr:InitiateLayerUpload",
+      "ecr:PutImage",
+      "ecr:UploadLayerPart"
+    ]
+
+    resources = [
+      local.transaction_api_ecr_arn
+    ]
+  }
+
+  statement {
+    sid    = "RegisterTransactionApiTaskDefinition"
+    effect = "Allow"
+
+    actions = [
+      "ecs:RegisterTaskDefinition"
+    ]
+
+    resources = [
+      local.transaction_api_task_definition_arn
+    ]
+  }
+
+  statement {
+    sid    = "ReadTaskDefinitions"
+    effect = "Allow"
+
+    actions = [
+      "ecs:DescribeTaskDefinition",
+      "ecs:ListTaskDefinitions"
+    ]
+
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "DeployTransactionApiService"
+    effect = "Allow"
+
+    actions = [
+      "ecs:DescribeServices",
+      "ecs:UpdateService"
+    ]
+
+    resources = [
+      local.transaction_api_ecs_service_arn
+    ]
+  }
+
+  statement {
+    sid    = "PassFinGuardECSTaskRoles"
+    effect = "Allow"
+
+    actions = [
+      "iam:PassRole"
+    ]
+
+    resources = [
+      local.ecs_execution_role_arn,
+      local.transaction_api_task_role_arn
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+
+      values = [
+        "ecs-tasks.amazonaws.com"
+      ]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "github_deploy" {
+  name = "finguard-github-deploy"
+
+  role = aws_iam_role.github_deploy.id
+
+  policy = data.aws_iam_policy_document.github_deploy.json
 }
