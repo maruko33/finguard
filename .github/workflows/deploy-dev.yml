@@ -14,6 +14,11 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: finguard-dev-deployment
+  cancel-in-progress: false
+  queue: max
+
 env:
   AWS_REGION: ca-central-1
   ECR_REPOSITORY: finguard-transaction-api
@@ -28,6 +33,10 @@ env:
 jobs:
   publish-transaction-api:
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && vars.DEV_DEPLOY_ENABLED == 'true'
+
+    environment:
+      name: dev
 
     steps:
       - name: Checkout repository
