@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "infra/terraform/**"
+      - "infra/bootstrap/**"
       - ".github/workflows/terraform-check.yml"
 
   push:
@@ -13,6 +14,7 @@ on:
       - main
     paths:
       - "infra/terraform/**"
+      - "infra/bootstrap/**"
       - ".github/workflows/terraform-check.yml"
 
 permissions:
@@ -21,10 +23,16 @@ permissions:
 jobs:
   terraform-static:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        directory:
+          - infra/terraform
+          - infra/bootstrap
 
     defaults:
       run:
-        working-directory: infra/terraform
+        working-directory: ${{ matrix.directory }}
 
     steps:
       - name: Checkout repository
@@ -43,3 +51,50 @@ jobs:
 
       - name: Validate Terraform
         run: terraform validate -no-color
+
+  terraform-plan:
+    needs: terraform-static
+    # Fork PRs receive static validation only; they must not assume the AWS role.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ca-central-1
+      TF_IN_AUTOMATION: "true"
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+    defaults:
+      run:
+        working-directory: infra/terraform
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.16.3"
+
+      - name: Authenticate Terraform Plan role with OIDC
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+          aws-region: ca-central-1
+
+      - name: Initialize runtime remote backend
+        run: |
+          : "${TF_STATE_BUCKET:?Set the TF_STATE_BUCKET repository variable}"
+          terraform init -input=false -lockfile=readonly \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=finguard/dev/terraform.tfstate" \
+            -backend-config="region=ca-central-1" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Plan runtime infrastructure
+        run: terraform plan -input=false -no-color -lock-timeout=60s

@@ -7,3 +7,9 @@
 *.tfplan
 
 *.tfvars
+
+# The bare local plan filename is not covered by *.tfplan.
+tfplan
+*.tfvars.json
+crash.log
+crash.*.log
