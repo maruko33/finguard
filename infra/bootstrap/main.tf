@@ -80,7 +80,7 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
 }
 
 
-#Github Terraform Plan Role - AWS only allows maruko33/finguard的pull request and main
+# Only this repository's main ref may assume the Terraform Plan role.
 data "aws_iam_policy_document" "github_terraform_plan_assume" {
 
   statement {
@@ -112,20 +112,19 @@ data "aws_iam_policy_document" "github_terraform_plan_assume" {
       variable = "token.actions.githubusercontent.com:sub"
 
       values = [
-        "${local.github_subject_prefix}:pull_request",
         "${local.github_subject_prefix}:ref:refs/heads/main"
       ]
     }
   }
 }
 
-#grant plan role AWS read permission
+# Broad AWS managed read access; not a project-scoped least-privilege policy.
 resource "aws_iam_role_policy_attachment" "github_terraform_plan_readonly" {
   role       = aws_iam_role.github_terraform_plan.name
   policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
-#State Bucket need least privilegde for write
+# Read existing state; only the lock object may be written or deleted here.
 data "aws_iam_policy_document" "github_terraform_state" {
 
   statement {
@@ -140,8 +139,7 @@ data "aws_iam_policy_document" "github_terraform_state" {
 
   statement {
     actions = [
-      "s3:GetObject",
-      "s3:PutObject"
+      "s3:GetObject"
     ]
 
     resources = [
