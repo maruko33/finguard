@@ -54,11 +54,12 @@ jobs:
 
   terraform-plan:
     needs: terraform-static
-    # Fork PRs receive static validation only; they must not assume the AWS role.
+    # PRs run static checks only; AWS access is limited to protected main pushes.
     if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.ref_protected == true &&
+      needs.terraform-static.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
